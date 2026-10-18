@@ -1,0 +1,4 @@
+-r requirements.txt
+
+# 仅自测需要（fastapi.testclient 依赖）
+httpx>=0.27

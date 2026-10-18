@@ -1,0 +1,206 @@
+/* TQ · 面板与功能坞布局（现代极简）
+   结构规则保留；颜色一律走 app.css 的设计令牌。 */
+:root{--tools-w:352px;--roster-w:268px}
+
+/* ---------------------------------------------------------------- 右舷 · 干员台 */
+#roster{right:calc(var(--sar) + 12px);top:calc(var(--sat) + 12px);bottom:12px;width:var(--roster-w);
+  border:1px solid var(--line);border-radius:var(--r-lg);background:var(--surface-2);box-shadow:var(--shadow-1)}
+#roster .pan-head{padding:12px 14px 10px;margin:0;border-bottom:1px solid var(--line);align-items:flex-start}
+#pan-name{font-size:14px;font-weight:650;color:var(--txt)}
+#pan-sub{font-size:10px;color:var(--txt-3)}
+#roster .pan-title{flex-wrap:wrap;gap:6px}
+#roster .pan-title .sub{flex-basis:100%}
+.pan-sec.ops{flex:1.7 1 0}
+.pan-sec.loot{flex:1 1 0}
+.sec-head{padding:10px 14px}
+.sec-t{font-size:11px;color:var(--txt-2)}
+.sec-t i,.grp-cnt{border-radius:var(--r-pill);background:var(--surface-3);font:10px var(--font-num);padding:3px 8px}
+.grp{padding:9px 14px 5px}
+.grp-name{font-size:11px;color:var(--txt-2)}
+.grp-bar{height:11px;border-radius:2px;box-shadow:none}
+.op{padding:8px 7px;margin:0 8px 6px;gap:8px;border-radius:var(--r-md);background:transparent;
+  border:1px solid transparent;box-shadow:none;min-height:58px}
+.op:hover{background:var(--surface-3)}
+.op.sel{background:var(--accent-soft);border-color:var(--line-strong);box-shadow:none}
+.op-av{width:32px;height:32px;min-width:32px;flex-basis:32px;border-radius:var(--r-pill);padding:1px;
+  border:1px solid var(--line);box-shadow:none;background:var(--c)}
+.op-av img{border-radius:var(--r-pill)}
+.op-n{font-size:12px;gap:4px;line-height:1.4;flex-wrap:wrap}
+.op-n .hero{font-size:10px;color:var(--txt-3)}
+.op-m{font-size:9px;line-height:1.5;color:var(--txt-2)}
+.op-d{font:600 14px var(--font-num)}
+.op-d .du{font-size:9px}
+.op-z{font:10px var(--font-num)}
+.op-hp{height:3px;border-radius:2px;background:var(--surface-3)}
+.badge{border-radius:var(--r-sm);font-size:9px;padding:1px 4px}
+.badge.bot-uncertain{color:var(--warn);border:1px solid var(--line-strong);background:var(--surface-3)}
+
+/* ---------------------------------------------------------------- 顶部战况岛 */
+#island{left:50%;right:auto;top:calc(var(--sat) + 12px);transform:translateX(-50%);width:340px;
+  min-width:0;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-pill);
+  box-shadow:var(--shadow-1)}
+#island:active{transform:translateX(-50%) scale(.98)}
+#island.open{min-width:0;border-radius:var(--r-lg)}
+#isl-main{gap:10px;padding:9px 12px;height:24px;box-sizing:border-box;min-height:38px}
+.isl-stat{gap:5px;padding-right:8px;border-right:1px solid var(--line-strong)}
+.isl-stat b{font:700 16px var(--font-num);color:var(--txt)}
+.isl-stat i{font-size:10px;letter-spacing:1px;color:var(--txt-2)}
+#isl-dot{width:5px;height:5px;animation:none}
+#isl-sep{display:none}
+#isl-near{font-size:10px}
+
+/* ---------------------------------------------------------------- 视图切换条 */
+#viewswitch{right:calc(var(--sar) + var(--roster-w) + 22px);top:calc(var(--sat) + 12px);
+  border-radius:var(--r-md);background:var(--surface)}
+.vs-seg{border-radius:var(--r-sm)}
+.vs,.mini-tab{border-radius:var(--r-sm)}
+.vs.on,.mini-tab.on{background:var(--accent-soft);color:var(--accent-on);box-shadow:inset 0 0 0 1px var(--line-strong)}
+#roster-handle{right:calc(var(--sar) + var(--roster-w));border-radius:var(--r-sm) 0 0 var(--r-sm);height:48px}
+body.roster-hidden #roster-handle{right:var(--sar)}
+
+/* ---------------------------------------------------------------- 左舷 · 功能坞 */
+#dock{left:calc(var(--sal) + 12px);top:calc(var(--sat) + 12px);bottom:12px;border-radius:var(--r-lg);
+  background:var(--surface-2);border:1px solid var(--line);box-shadow:var(--shadow-1)}
+.dock-head{border-bottom:1px solid var(--line)}
+#dock>.pan-head{padding:14px 16px 12px;margin:0;border-bottom:1px solid var(--line)}
+#dock>.pan-head .pan-title{font-size:15px;letter-spacing:.3px}
+#dock-handle{left:calc(var(--sal) + var(--tools-w) + 12px);height:46px;border-radius:0 var(--r-sm) var(--r-sm) 0}
+.dock-layout{display:flex;flex:1;min-height:0;overflow:hidden}
+.dock-tabs{width:76px;flex:none;display:flex;flex-direction:column;gap:6px;padding:14px 7px;
+  border-right:1px solid var(--line);background:transparent}
+.dock-tabs button{border:1px solid transparent;border-radius:var(--r-sm);background:transparent;
+  color:var(--txt-3);font:600 12px var(--font);padding:13px 0;cursor:pointer;
+  transition:background .15s,color .15s}
+.dock-tabs button:hover{background:var(--surface-3);color:var(--txt)}
+.dock-tabs button[aria-selected=true]{color:var(--accent-on);background:var(--accent-soft);
+  border-color:var(--line-strong);box-shadow:inset 2px 0 var(--accent)}
+.dock-tabs button:focus-visible,#dock input:focus-visible,#dock button:focus-visible,#dock select:focus-visible{
+  outline:2px solid var(--accent);outline-offset:2px}
+.dock-content{flex:1;min-width:0;overflow:auto;overscroll-behavior:contain;
+  scrollbar-width:thin;scrollbar-color:var(--line-strong) transparent}
+.dock-page{padding:17px 14px 20px}
+.dock-page[hidden]{display:none!important}
+.dock-page-head{margin-bottom:18px}
+.dock-page h2{font-size:15px;font-weight:650;color:var(--txt);margin:0 0 6px}
+.dock-page-head p{font-size:11px;color:var(--txt-3);line-height:1.6;margin:0}
+.dock-group{margin-bottom:18px}
+.dock-group h3{font-size:10px;letter-spacing:1px;color:var(--txt-3);font-weight:600;margin:0 0 9px}
+.dock-controls{background:var(--surface-3);border:1px solid var(--line);border-radius:var(--r-md);padding:3px 10px}
+#dock .dock-controls .row{margin:0;padding:11px 0;border-bottom:1px solid var(--line)}
+#dock .dock-controls .row:last-child{border-bottom:0}
+#dock .row-t{font-size:12px;font-weight:500;color:var(--txt)}
+#dock .row-s{font-size:10px;color:var(--txt-3);line-height:1.5;margin-top:4px}
+#dock .dock-controls .row-btn{width:100%;margin:0}
+.dock-switches{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+#dock .dock-switches .row{margin:0;padding:10px 8px;min-width:0;gap:5px;border-radius:var(--r-sm);
+  background:var(--surface-3);border:1px solid var(--line);align-items:center}
+#dock .dock-switches .row-col{min-width:0;flex:1}
+#dock .dock-switches .row-t{font-size:11px;line-height:1.5}
+#dock .dock-switches .row-s{display:none}
+#dock .dock-switches .sw{transform:scale(.76);transform-origin:right center;flex:none;margin-left:-9px}
+#dock .dock-controls .sld{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px 7px;padding:12px 0;
+  margin:0;border-bottom:1px solid var(--line)}
+#dock .dock-controls .sld:last-child{border-bottom:0}
+#dock .sld>span:first-child{font-size:11px!important;color:var(--txt-2)!important;white-space:normal!important;
+  grid-column:1;grid-row:1;line-height:1.5}
+#dock .sld>.v{grid-column:2;grid-row:1;font:11px var(--font-num);color:var(--txt-2);min-width:36px;text-align:right}
+#dock .sld>input[type=range]{grid-column:1 / -1;grid-row:2;width:100%;min-width:0;margin:2px 0 4px;
+  cursor:pointer;height:5px;accent-color:var(--accent)}
+#dock .sld>.vs-seg{grid-column:1 / -1;display:flex;width:100%;gap:2px;background:var(--surface-3);
+  padding:3px;box-sizing:border-box}
+#dock .sld>.vs-seg .vs{min-width:0;flex:1;padding:7px 2px;font-size:10px}
+#dock .k{font-size:11px;color:var(--txt-2)}
+.color-setting{gap:10px}
+.color-swatch{display:flex;align-items:center;gap:7px;color:var(--txt-2);font:10px var(--font-num)}
+.color-swatch input{width:30px;height:24px;padding:0;border:1px solid var(--line-strong);
+  border-radius:var(--r-sm);background:transparent;cursor:pointer}
+.color-swatch input::-webkit-color-swatch-wrapper{padding:2px}
+.color-swatch input::-webkit-color-swatch{border:0;border-radius:3px}
+#dock .pick{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin:8px 0;padding:0}
+#dock .pick button{padding:8px 3px;font-size:11px}
+.dock-note{font-size:10px;color:var(--txt-3);line-height:1.8;margin:4px 2px 0}
+#dock #gateway-diagnostics{position:static!important;flex:none;max-width:none!important;max-height:145px;
+  overflow:auto;margin:0 12px 10px;padding:9px 10px!important;font-size:10px!important;
+  border:1px solid var(--line)!important;background:var(--surface-3)!important;border-radius:var(--r-sm)!important}
+#dock #gateway-diagnostics summary{color:var(--txt-2);cursor:pointer}
+
+/* ---------------------------------------------------------------- 装备图标 */
+.gear-inline{display:inline-flex;gap:4px;vertical-align:middle}
+.gear-chip{display:inline-flex;align-items:center;gap:2px;color:var(--gear,var(--txt-2));white-space:nowrap}
+.gear-chip b{font:700 9px var(--font-num);color:var(--txt)}
+.gear-icon{display:inline-block;width:13px;height:13px;background:var(--gear,var(--txt-2));
+  -webkit-mask-position:center;-webkit-mask-repeat:no-repeat;-webkit-mask-size:contain;
+  mask-position:center;mask-repeat:no-repeat;mask-size:contain}
+.gear-icon.helmet{-webkit-mask-image:url('/ui/icons/helmet.png?v=1.2.0');mask-image:url('/ui/icons/helmet.png?v=1.2.0')}
+.gear-icon.armor{-webkit-mask-image:url('/ui/icons/armor.png?v=1.2.0');mask-image:url('/ui/icons/armor.png?v=1.2.0')}
+.gear-icon.bag{-webkit-mask-image:url('/ui/icons/bag.png?v=1.2.0');mask-image:url('/ui/icons/bag.png?v=1.2.0')}
+.gear-icon.rig{-webkit-mask-image:url('/ui/icons/rig.png?v=1.2.0');mask-image:url('/ui/icons/rig.png?v=1.2.0')}
+.grb{height:18px!important;gap:5px!important;padding:0 7px!important;border-radius:var(--r-pill)!important;
+  background:rgba(var(--tag-bg-rgb),.9)!important;border:1px solid var(--tag-bd);box-shadow:none!important}
+.grb .gear-chip{padding:0;background:transparent}
+.grb .gear-chip b{font-size:9px}
+
+/* ---------------------------------------------------------------- 三列干员行 */
+#roster .pan-head{padding:10px 12px 8px}
+#roster .sec-head{padding:7px 10px 4px}
+#roster .grp{padding:6px 10px 3px;gap:6px}
+#roster .grp-bar{height:10px}
+#roster .grp-name{font-size:10px}
+#roster .grp-cnt,#roster .grp-near{font-size:9px}
+#roster .op{display:grid;grid-template-columns:28px minmax(0,1fr) 40px;align-items:center;column-gap:7px;
+  min-height:46px;box-sizing:border-box;padding:5px 6px;margin:0 6px 3px;overflow:hidden}
+#roster .op.expanded{align-items:start;min-height:46px;overflow:visible}
+#roster .op-av{width:28px;height:28px;min-width:28px;flex-basis:28px;font-size:10px;grid-column:1;align-self:center}
+#roster .op-av.box{width:22px;height:22px;min-width:22px;margin:3px}
+#roster .op-ring{inset:-2px;border-width:1px;border-radius:50%}
+#roster .op-col{grid-column:2;display:grid;grid-template-rows:auto auto auto;gap:1px;min-width:0;overflow:hidden}
+#roster .op.expanded .op-col{overflow:visible}
+#roster .op-n{display:block;min-width:0;font-size:10.5px;line-height:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#roster .op-title{display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#roster .op-n .hero{font-size:8.5px;margin-left:4px}
+#roster .op-m{display:flex;align-items:center;gap:3px;height:13px;min-width:0;margin:0;font-size:8px;
+  line-height:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#roster .op-m>*{flex:none}
+#roster .op-m .bags,#roster .op-m .wp{min-width:0;overflow:hidden;text-overflow:ellipsis}
+#roster .op-sep{font-style:normal;color:var(--txt-3);opacity:.45}
+#roster .badge{font-size:7.5px;line-height:10px;padding:0 3px;border-radius:2px}
+#roster .badge.bot-confirmed{color:var(--warn);border:1px solid var(--line-strong);background:var(--surface-3)}
+#roster .gear-inline{gap:2px}.gear-chip{gap:1px}.gear-icon{width:10px;height:10px}.gear-chip b{font-size:7.5px}
+#roster .op-r{grid-column:3;min-width:40px;width:40px;align-self:center;overflow:hidden}
+#roster .op-d{font-size:11px;line-height:13px;white-space:nowrap}
+#roster .op-d .du{font-size:7px}
+#roster .op-z{font-size:8px;line-height:10px;margin:0;white-space:nowrap}
+#roster .op-hp{height:2px;margin:1px 0 0}
+#roster .tip-r{font-size:8px;line-height:1.35;gap:5px}
+
+/* ---------------------------------------------------------------- 3D 人物颜色控件 */
+#dock .color-setting{min-height:43px;margin:3px 0!important;padding:7px 8px!important;
+  border:1px solid var(--line)!important;border-radius:var(--r-sm);background:var(--surface-3)}
+#dock .color-setting.visible{box-shadow:inset 2px 0 var(--mate)}
+#dock .color-setting.occluded{box-shadow:inset 2px 0 var(--danger)}
+#dock .color-setting .row-t{font-size:11px;font-weight:650}
+#dock .color-setting .row-s{font-size:9px;margin-top:1px}
+#dock .color-swatch{gap:5px;font-size:9px}
+#dock .color-swatch input{width:38px;height:28px}
+
+/* ---------------------------------------------------------------- 响应式 */
+@media(max-width:1100px) and (min-width:901px){
+  :root{--tools-w:330px;--roster-w:270px}
+  #island{width:320px}.dock-tabs{width:67px}.dock-page{padding:15px 10px}}
+@media(max-width:900px){
+  #dock{left:8px;right:auto;top:76px;bottom:72px;height:auto;width:min(360px,calc(100vw - 16px));
+    max-width:calc(100vw - 16px);border-radius:var(--r-lg);max-height:none}
+  #dock-handle{left:calc(min(360px,100vw - 16px) + 8px)}
+  .dock-tabs{width:68px}.dock-page{padding:14px 10px}.dock-tabs button{padding:13px 0}
+  #dock:not(.up),#roster:not(.up){transform:translateY(110vh);visibility:hidden;pointer-events:none}
+  #dock.up,#roster.up{transform:none;visibility:visible;pointer-events:auto}
+  #roster{height:auto;max-height:none;top:76px;bottom:72px}
+  #viewswitch{display:none}
+}
+@media(max-width:720px){
+  :root{--roster-w:min(268px,calc(100vw - 32px))}
+  #roster{right:8px;left:auto;top:92px;bottom:70px;width:var(--roster-w);max-height:70vh}
+  #island{left:50%;right:auto;top:10px;width:min(340px,calc(100vw - 16px))}
+  #roster-handle{right:calc(var(--roster-w) + 8px)}
+  #dock{max-width:calc(100vw - 28px)}
+}

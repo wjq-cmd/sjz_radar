@@ -1,0 +1,12 @@
+# 密钥与数据库，绝对不能进版本库
+.env
+*.db
+*.sqlite3
+*.csv
+
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.idea/
+.vscode/

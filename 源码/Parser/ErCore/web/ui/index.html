@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<script>
+/* 首屏主题预置：避免深/浅切换时闪白 */
+try{var t=localStorage.getItem('nr2_theme');
+  if(t==='light'||(!t&&matchMedia('(prefers-color-scheme: light)').matches))
+    document.documentElement.setAttribute('data-theme','light');}catch(e){}
+</script>
+<script type="importmap">{"imports":{"three":"/vendor/three/build/three.module.js","three/addons/":"/vendor/three/examples/jsm/"}}</script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0B0C0E">
+<meta name="color-scheme" content="dark light">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="tq-no3d" content="0">
+<meta name="application-name" content="TQ">
+<title>TQ</title>
+<link rel="stylesheet" href="/vendor/leaflet/leaflet.css">
+<link rel="stylesheet" href="/ui/app.css?v=1.2.0">
+<link rel="stylesheet" href="/ui/shubao.css?v=1.2.0">
+<script src="/ui/dock.js?v=1.2.0" defer></script>
+</head>
+<body>
+<div id="map"></div>
+<div id="mini-hint">Shift+拖动 移动小地图 · Shift+滚轮 缩放</div>
+
+<!-- 3D 白模视图：与 2D 同源数据，按需加载 /m3d/r3d.js -->
+<div id="r3">
+  <canvas id="r3-cv"></canvas>
+  <div id="r3-lbl"></div>
+  <svg id="ray-layer" aria-hidden="true"></svg>
+  <svg id="warn-layer" aria-hidden="true"></svg>
+</div>
+<div id="r3-load"><div id="r3-load-t">载入 3D 底图…</div><div id="r3-bar"><i></i></div></div>
+<div id="camseg" class="glass">
+  <button data-cam="orbit">自由</button>
+  <button data-cam="top">俯视</button>
+  <button data-cam="fpv">第一跟随</button>
+  <button data-cam="chase">第三跟随</button>
+</div>
+
+<div id="hud">加载中…</div>
+<div id="scrim-t"></div>
+<div id="scrim-b"></div>
+
+<!-- 战况岛：折叠态=「剩余敌人 + 最近威胁距离」，点开=完整战况 -->
+<div id="island">
+  <div id="isl-main">
+    <span id="isl-dot"></span>
+    <span class="isl-stat"><b id="isl-num" class="tnum">--</b><i>存活</i></span>
+    <span class="isl-stat"><b id="isl-down" class="tnum">--</b><i>倒地</i></span>
+    <span class="isl-stat"><b id="isl-dead" class="tnum">--</b><i>阵亡</i></span>
+    <span id="isl-sep"></span>
+    <span id="isl-near" class="tnum">最近 <b>--</b></span>
+  </div>
+  <div id="isl-ext">
+    <div class="isl-cell"><b id="c-alive" class="tnum">-</b><span>存活</span></div>
+    <div class="isl-cell"><b id="c-dead" class="tnum">-</b><span>阵亡</span></div>
+    <div class="isl-cell"><b id="c-box" class="tnum">-</b><span>盒子</span></div>
+    <div class="isl-cell"><b id="c-ai" class="tnum">-</b><span>AI</span></div>
+    <div class="isl-cell"><b id="c-team" class="tnum">-</b><span>我方</span></div>
+  </div>
+  <div id="isl-foot"></div>
+</div>
+
+<!-- 顶部公告位已移除（公益提示 / 电报群入口） -->
+
+<!-- 右舷 · 干员台：干员在上、物资在下，同窗并存（移动端=底部抽屉） -->
+<div id="roster" class="glass">
+  <div class="pan-head">
+    <div class="pan-title">
+      <span id="uname" style="color:var(--warn);font-weight:640"></span><span id="pan-name">玩家列表</span>
+      <span class="sub" id="pan-sub">等待数据</span>
+    </div>
+    <button class="icon-btn" id="btn-roster-close" title="收起" aria-label="收起">
+      <svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
+    </button>
+  </div>
+  <div class="pan-split">
+    <section class="pan-sec ops">
+      <div class="sec-head">
+        <span class="sec-t">干员 <i id="n-ops">0</i></span>
+        <div class="sortbar" id="sortbar">
+          <button class="mini-tab" data-sort="dist">距离</button>
+          <button class="mini-tab on" data-sort="team">队伍</button>
+          <span id="sort-hint"></span>
+        </div>
+      </div>
+      <div class="pan-body" id="ops-body"><div class="empty">等待对局数据…</div></div>
+    </section>
+    <section class="pan-sec loot">
+      <div class="sec-head">
+        <span class="sec-t">物资 <i id="n-loot">0</i></span>
+        <div class="sortbar" id="loot-sortbar">
+          <button class="mini-tab" data-loot-sort="dist">距离</button>
+          <button class="mini-tab" data-loot-sort="price">价值</button>
+          <button class="mini-tab" data-loot-sort="grade">品质</button>
+          <span id="loot-filter-hint"></span>
+        </div>
+      </div>
+      <div class="pan-body" id="loot-body"></div>
+    </section>
+  </div>
+</div>
+
+<button id="roster-handle" title="收起 / 展开干员台" aria-label="收起或展开干员台">
+  <svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>
+</button>
+
+<!-- 视图切换：2D / 3D 分段 + 小地图 / 跟随，悬浮在干员台左上 -->
+<div id="viewswitch" class="glass">
+  <div class="vs-seg" role="group" aria-label="视图模式">
+    <button class="vs-ic" id="s-warn3d" title="屏幕外预警" aria-label="屏幕外预警">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M16.5 7.5h-5M16.5 7.5v5M16.5 7.5l-6.5 6.5"/></svg>
+    </button>
+    <button class="vs-ic" id="s-ray" title="敌人连线" aria-label="敌人连线">
+      <svg viewBox="0 0 24 24"><path d="M12 3v5M12 8l-7 13M12 8l7 13"/></svg>
+    </button>
+    <button class="vs-ic" id="s-box3d" title="人物方框" aria-label="人物方框">
+      <svg viewBox="0 0 24 24"><path d="M4 8V4h4M20 8V4h-4M4 16v4h4M20 16v4h-4"/></svg>
+    </button>
+    <button class="vs on" id="s-2d">2D</button>
+    <button class="vs" id="s-3d">3D</button>
+  </div>
+  <button class="vs-ic" id="s-pip" title="3D 小地图" aria-label="3D 小地图">
+    <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 20V4"/></svg>
+  </button>
+  <button class="vs-ic" id="s-follow" title="镜头跟随" aria-label="镜头跟随">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M23 12h-4M5 12H1"/><circle cx="12" cy="12" r="8"/></svg>
+  </button>
+</div>
+
+<!-- 左舷 · 功能台：设置项按板块平铺，开关即按钮 -->
+<div id="dock" class="glass">
+  <div class="pan-head">
+    <div class="pan-title">功能台 <span class="sub" id="tools-sub">显示与元素</span></div>
+    <button class="icon-btn" id="btn-dock-close" title="收起" aria-label="收起功能台">
+      <svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
+    </button>
+  </div>
+  <div class="pan-body">
+    <button class="row row-btn" id="s-map"><div class="row-col"><div class="row-t">切换地图</div><div class="row-s">2D 底图选择</div></div><span class="row-go">›</span></button>
+    <div class="sec">头顶信息</div>
+    <div class="row"><div class="row-col"><div class="row-t">干员名</div><div class="row-s">显示干员 / 玩家名</div></div><button class="sw" id="s-name"></button></div>
+    <div class="row"><div class="row-col"><div class="row-t">武器</div><div class="row-s">当前手持武器名</div></div><button class="sw" id="s-wpn"></button></div>
+    <div class="row"><div class="row-col"><div class="row-t">头盔护甲</div><div class="row-s">头X甲Y 等级标注</div></div><button class="sw" id="s-gear"></button></div>
+    <div class="row"><div class="row-col"><div class="row-t">距离</div><div class="row-s">到自己的平面距离</div></div><button class="sw" id="s-dist"></button></div>
+    <div class="sld"><span style="font-size:11.5px;color:var(--txt-2);white-space:nowrap">标记大小</span>
+      <input id="s-dotsize" type="range" min="60" max="220" value="100"><span class="v tnum" id="v-dotsize">100%</span></div>
+    <div class="sld"><span style="font-size:11.5px;color:var(--txt-2);white-space:nowrap">字体大小</span>
+      <input id="s-fontsize" type="range" min="80" max="220" value="100"><span class="v tnum" id="v-fontsize">100%</span></div>
+    <div class="sld"><span style="font-size:11.5px;color:var(--txt-2);white-space:nowrap">状态字体粗细</span>
+      <input id="s-tagw" type="range" min="300" max="900" step="50" value="600"><span class="v tnum" id="v-tagw">600</span></div>
+    <div class="sld"><span style="font-size:11.5px;color:var(--txt-2);white-space:nowrap">信息条底色</span>
+      <input id="s-tagop" type="range" min="0" max="100" value="80"><span class="v tnum" id="v-tagop">80%</span></div>
+
+    <div class="sec">地图元素</div>
+    <div class="sld"><span>墙体透明度</span><input id="s-walltrans" type="range" min="0" max="100" step="1" value="78"><span class="v tnum" id="v-walltrans">78%</span></div>
+    <div class="sld"><span>地面 / 屋顶透明度</span><input id="s-floortrans" type="range" min="0" max="100" step="1" value="0"><span class="v tnum" id="v-floortrans">0%</span></div>
+    <div class="row"><div class="row-col"><div class="row-t">朝向锥</div>
+    <div class="row-s">显示角色面朝方向</div></div><button class="sw" id="s-cone"></button></div>
+    <div class="sld"><span style="font-size:11.5px;color:var(--txt-2);white-space:nowrap">枪线长度</span>
+      <input id="s-gunlen" type="range" min="30" max="400" value="92"><span class="v tnum" id="v-gunlen">92px</span></div>
+    <div class="sld"><span style="font-size:11.5px;color:var(--txt-2);white-space:nowrap">第一视角位置平滑</span>
+      <input id="s-fpvtau" type="range" min="0" max="300" step="10" value="80"><span class="v tnum" id="v-fpvtau">80ms</span></div>
+    <div class="sld"><span style="font-size:11.5px;color:var(--txt-2);white-space:nowrap">第一视角高度</span>
+      <input id="s-fpvheight" type="range" min="0.6" max="2.6" step="0.1" value="1.6"><span class="v tnum" id="v-fpvheight">1.6m</span></div>
+    <div class="sld"><span style="font-size:11.5px;color:var(--txt-2);white-space:nowrap">视野 FOV</span>
+      <input id="s-fov" type="range" min="55" max="120" step="1" value="58"><span class="v tnum" id="v-fov">58°</span></div>
+    <div class="sld"><span style="font-size:11.5px;color:var(--txt-2);white-space:nowrap">人物大小</span>
+      <input id="s-charsize" type="range" min="50" max="200" step="5" value="100"><span class="v tnum" id="v-charsize">100%</span></div>
+    <div class="sld"><span style="font-size:11.5px;color:var(--txt-2);white-space:nowrap">预警距离</span>
+      <input id="s-warnd" type="range" min="0" max="300" step="10" value="150"><span class="v tnum" id="v-warnd">150m</span></div>
+    <div class="sld"><span style="font-size:11.5px;color:var(--txt-2);white-space:nowrap">预警圆半径</span>
+      <input id="s-warnr" type="range" min="60" max="420" step="10" value="200"><span class="v tnum" id="v-warnr">200px</span></div>
+    <div class="sld"><span style="font-size:11.5px;color:var(--txt-2);white-space:nowrap">预警箭头大小</span>
+      <input id="s-warnsz" type="range" min="60" max="300" step="10" value="100"><span class="v tnum" id="v-warnsz">100%</span></div>
+    <div class="sld"><span>3D 人物模型</span>
+      <div class="vs-seg" id="model3dseg" role="group" aria-label="3D 人物模型">
+        <button class="vs on" data-model="tactical">战术</button><button class="vs" data-model="mannequin">简洁</button><button class="vs" data-model="beacon">信标</button><button class="vs" data-model="capsule">胶囊</button></div></div>
+    <div class="sld"><span>3D 朝向样式</span>
+      <div class="vs-seg" id="direction3dseg" role="group" aria-label="3D 朝向样式">
+        <button class="vs on" data-direction="arrow">箭头</button><button class="vs" data-direction="line">直线</button></div></div>
+    <div class="sld"><span>3D 朝向位置</span>
+      <div class="vs-seg" id="directionanchor3dseg" role="group" aria-label="3D 朝向位置">
+        <button class="vs on" data-anchor="head">头部</button><button class="vs" data-anchor="foot">脚底</button></div></div>
+    <div class="row color-setting visible"><div class="row-col"><div class="row-t">可见颜色</div><div class="row-s">人物未被建筑遮挡</div></div><label class="color-swatch"><input id="s-visiblecolor3d" type="color" value="#49d5ff" aria-label="3D 可见人物颜色"><span id="v-visiblecolor3d">#49D5FF</span></label></div>
+    <div class="row color-setting occluded"><div class="row-col"><div class="row-t">掩体后颜色</div><div class="row-s">人物位于墙体或掩体后</div></div><label class="color-swatch"><input id="s-occludedcolor3d" type="color" value="#ff4058" aria-label="3D 掩体后人物颜色"><span id="v-occludedcolor3d">#FF4058</span></label></div>
+    <div class="sld"><span>界面主题</span>
+      <div class="vs-seg" id="panelthemeseg" role="group" aria-label="界面主题">
+        <button class="vs on" data-theme="dark">深色</button><button class="vs" data-theme="light">浅色</button></div></div>
+    <div class="sld"><span style="font-size:11.5px;color:var(--txt-2);white-space:nowrap">3D 画质</span>
+      
+      <div class="vs-seg" id="q3dseg" role="group" aria-label="3D 画质">
+        <button class="vs on" data-q="auto">自动</button><button class="vs" data-q="perf">流畅</button><button class="vs" data-q="balanced">平衡</button><button class="vs" data-q="high">高清</button></div></div>
+    <div class="sld"><span style="font-size:11.5px;color:var(--txt-2);white-space:nowrap">帧率上限</span>
+      <div class="vs-seg" id="fpscapseg" role="group" aria-label="帧率上限">
+        <button class="vs on" data-f="0">无上限</button><button class="vs" data-f="60">60</button><button class="vs" data-f="120">120</button><button class="vs" data-f="144">144</button></div></div>
+    <div class="row"><div class="row-col"><div class="row-t">队友</div><div class="row-s">关闭后只看敌人</div></div><button class="sw" id="s-mate"></button></div>
+    <div class="row"><div class="row-col"><div class="row-t">敌人标识</div><div class="row-s">敌人头顶显示红色「敌人」</div></div><button class="sw" id="s-foe"></button></div>
+    <div class="row"><div class="row-col"><div class="row-t">移动轨迹</div><div class="row-s">最近一段路径</div></div><button class="sw" id="s-trail"></button></div>
+    <div class="row"><div class="row-col"><div class="row-t">血量条</div><div class="row-s">0–100 连续显示剩余血量</div></div><button class="sw" id="s-hp"></button></div>
+    <div class="row"><div class="row-col"><div class="row-t">死亡盒</div><div class="row-s">阵亡玩家掉落点</div></div><button class="sw" id="s-box"></button></div>
+    <div class="row"><div class="row-col"><div class="row-t">普通容器</div><div class="row-s">仅显示已识别位置，内容未知时明确标注</div></div><button class="sw" id="s-container"></button></div>
+    <div class="row"><div class="row-col"><div class="row-t">人机盒子</div><div class="row-s">已识别的小兵 / 人机干员盒子</div></div><button class="sw" id="s-aibox"></button></div>
+    <div class="row"><div class="row-col"><div class="row-t">AI 单位</div><div class="row-s">按出生点显示（空心标记 + 情报龄）</div></div><button class="sw" id="s-ai"></button></div>
+
+    <div class="sec">物资</div>
+    <div class="row"><div class="row-col"><div class="row-t">物资上图</div><div class="row-s">高价值物资标记到地图</div></div><button class="sw" id="s-loot"></button></div>
+    <div class="pick" id="pick-loot">
+      <button data-g="0">全部</button>
+      <button data-g="3">蓝以上</button><button data-g="4" class="on">紫以上</button>
+      <button data-g="5">金以上</button><button data-g="6">仅红</button>
+    </div>
+
+    <div class="sec">面板与预警</div>
+    <div class="row"><div class="row-col"><div class="row-t">干员台</div><div class="row-s">右侧人员 / 物资清单</div></div><button class="sw" id="s-roster"></button></div>
+    <div class="sld"><span style="font-size:11.5px;color:var(--txt-2);white-space:nowrap">贴脸高亮</span>
+      <input id="s-alert" type="range" min="0" max="300" step="10" value="80"><span class="v tnum" id="v-alert">80m</span></div>
+    <div class="row" style="padding-top:0"><div class="row-col"><div class="row-s">敌人进入该距离时标记闪烁、干员台置顶。拖到 0 关闭。3D 屏幕外预警的「贴脸红点」也用它。</div></div></div>
+  </div>
+</div>
+
+<button id="dock-handle" title="收起 / 展开功能台" aria-label="收起或展开功能台">
+  <svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg>
+</button>
+
+<!-- 移动端底部快捷条：干员 / 跟随 / 物资 / 地图 / 设置 -->
+<div id="quick" class="glass">
+  <button class="qk" id="qk-roster">
+    <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/></svg>
+    <span>干员</span>
+  </button>
+  <button class="qk" id="qk-3d">
+    <svg viewBox="0 0 24 24"><path d="M12 2l9 5v10l-9 5-9-5V7z"/><path d="M12 12l9-5M12 12v10M12 12L3 7"/></svg>
+    <span>3D</span>
+  </button>
+  <button class="qk" id="qk-follow">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M23 12h-4M5 12H1"/><circle cx="12" cy="12" r="8"/></svg>
+    <span>跟随</span>
+  </button>
+  <button class="qk" id="qk-loot">
+    <svg viewBox="0 0 24 24"><path d="M21 8v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8"/><rect x="1" y="3" width="22" height="5" rx="1"/></svg>
+    <span>物资</span>
+  </button>
+  <button class="qk" id="qk-map">
+    <svg viewBox="0 0 24 24"><path d="M1 6v16l7-4 8 4 7-4V2l-7 4-8-4-7 4z"/><path d="M8 2v16M16 6v16"/></svg>
+    <span>地图</span>
+  </button>
+  <button class="qk" id="qk-set">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M20 12h2M2 12h2M12 2v2M12 20v2M18.4 5.6l1.4-1.4M4.2 19.8l1.4-1.4M18.4 18.4l1.4 1.4M4.2 4.2l1.4 1.4"/></svg>
+    <span>设置</span>
+  </button>
+</div>
+
+<div id="veil"></div>
+
+<!-- 地图层：卡片式选择 -->
+<div id="sheet-map" class="sheet glass">
+  <div class="pan-head">
+    <div class="pan-title">选择地图 <span class="sub" id="map-now"></span></div>
+    <button class="icon-btn" data-close="sheet-map" aria-label="关闭">
+      <svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
+    </button>
+  </div>
+  <div class="sheet-body"><div class="maps" id="maps"></div></div>
+</div>
+
+<!-- 回放轨：仅回放模式显示 -->
+<div id="playbar" class="glass hide">
+  <button id="btn-play" aria-label="播放/暂停"><svg id="ic-play" viewBox="0 0 24 24"><path d="M6 4h4v16H6zM14 4h4v16h-4z"/></svg></button>
+  <input id="seek" type="range" min="0" max="1000" value="0">
+  <span id="tlabel" class="tnum">--:-- / --:--</span>
+  <div class="spd" id="spd">
+    <button data-spd="1" class="on">1×</button><button data-spd="2">2×</button>
+    <button data-spd="4">4×</button><button data-spd="16">16×</button>
+  </div>
+</div>
+
+<details id="gateway-diagnostics" class="glass" style="position:fixed;left:12px;bottom:12px;z-index:950;padding:8px 12px;border-radius:12px;max-width:min(420px,90vw);font-size:12px">
+  <summary id="gateway-rate" style="cursor:pointer">数据状态 · 等待解析</summary>
+  <pre id="gateway-stats" style="white-space:pre-wrap;margin:8px 0 0;line-height:1.7;font-family:inherit">等待状态</pre>
+</details>
+<div id="toast"></div>
+<script src="/vendor/leaflet/leaflet.js"></script>
+<script src="/ui/app.js?v=1.2.0"></script>
+</body>
+</html>

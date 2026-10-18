@@ -1,0 +1,35 @@
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+globalThis.window={addEventListener(){},dispatchEvent(){}};
+globalThis.document={getElementById(){return null;}};
+globalThis.localStorage={getItem(){return null;}};
+const {interpolateHumans,toKorr,geometryFromParts}=await import('../Parser/ErCore/web/m3d/korr-adapter.js');
+const THREE=await import('three');
+const {parseGLB}=await import('../Parser/ErCore/web/m3d/r3d.js');
+const human=(key,x,yaw=0)=>({key,name:'同名',kind:'player',world:[x,200,300],yaw,hp:{total:[80,100]}});
+const before={entities:[human('a',0,359),human('b',1000),{...human('bot',0),is_bot:true}],self:[0,0,0],self_yaw:359,replay:{paused:false}};
+const after={entities:[human('b',2000),human('a',100,1),{...human('bot',100),is_bot:true}],self:[100,0,0],self_yaw:1,replay:{paused:false}};
+const midway=interpolateHumans(before,after,.5);
+assert.equal(midway.entities[0].world[0],1500);assert.equal(midway.entities[1].world[0],50);
+assert.equal(midway.entities[1].yaw,360);assert.equal(midway.entities[2].world[0],100);
+assert.equal(midway.self[0],50);
+assert.equal(interpolateHumans(before,{...after,replay:{paused:true}},.1).entities[1].world[0],100);
+assert.equal(interpolateHumans(before,{...after,replay:{seeking:true}},.1).entities[1].world[0],100);
+const many=toKorr({entities:Array.from({length:130},(_,i)=>human('h'+i,i)),self:[0,0,0]});
+assert.equal(many.players.length,130);assert.equal(new Set(many.players.map(e=>e.name)).size,130);
+assert.deepEqual([many.players[0].hp,many.players[0].maxHp],[80,100]);
+assert.equal(toKorr(after).ais.length,0);assert.equal(toKorr(after).players.length,3);
+const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute([1,2,3,4,5,6,7,8,9],3));g.setIndex([0,1,2]);
+const transformed=geometryFromParts([{geometry:g,matrix:new THREE.Matrix4().makeTranslation(10,20,30)}]);
+assert.deepEqual(Array.from(transformed.attributes.position.array).slice(0,3),[11,-33,22]);
+assert.equal(transformed.index.count,3);transformed.dispose();
+const manifest=JSON.parse(readFileSync(new URL('../../程序/models/manifest.json',import.meta.url),'utf8'));
+const model=manifest.maps.daba;
+const buf=readFileSync(new URL('../../程序/models/'+model.file,import.meta.url));
+const array=buf.buffer.slice(buf.byteOffset,buf.byteOffset+buf.byteLength);
+const parts=parseGLB(array);const merged=geometryFromParts(parts);merged.computeBoundingBox();
+const fixture=JSON.parse(readFileSync(new URL('../../../GatewayCapture/verification/er-compatibility/replay-v1/snapshot-final.json',import.meta.url),'utf8'));
+for(const e of [...fixture.entities,{world:fixture.self}]){
+ const [x,y,z]=e.world;assert(merged.boundingBox.containsPoint(new THREE.Vector3(x/100,-y/100,z/100)),JSON.stringify(e));
+}
+console.log(JSON.stringify({passed:true,checks:['130 humans, no proximity exclusion','stable keys despite same name and reordered entities','shortest-angle yaw','human-only interpolation, pause and seek snap','hp mapping','matrix and indexed geometry','actual Daba model contains all fixture coordinates'],triangles:merged.index.count/3,bounds:merged.boundingBox},null,2));

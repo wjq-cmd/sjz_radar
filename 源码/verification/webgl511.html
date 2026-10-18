@@ -1,0 +1,101 @@
+<!doctype html><meta charset="utf-8"><title>V1.1.0 WebGL regression</title>
+<style>body{margin:0;background:#111827;color:#d1fae5;font:14px monospace}#r3-cv{width:100vw;height:80vh;display:block}pre{white-space:pre-wrap}button{padding:10px}</style>
+<script type="importmap">{"imports":{"three":"/vendor/three/build/three.module.js","three/addons/":"/vendor/three/examples/jsm/"}}</script>
+<canvas id="r3-cv"></canvas><button id="follow">跟随</button><button id="fpv">第一视角</button><pre id="result">Running renderer checks…</pre>
+<script type="module">
+import * as THREE from 'three';
+import {create} from '/m3d/korr-adapter.js?v=1.1.0';
+import {gateway} from '/m3d/korr-renderer.js?v=1.1.0';
+const output=document.getElementById('result'),checks=[],errors=[];
+window.addEventListener('error',e=>errors.push(e.message));
+const assert=(condition,message)=>{if(!condition)throw Error(message);};
+const near=(a,b)=>a.length===b.length&&a.every((v,i)=>Math.abs(v-b[i])<1e-6);
+const frames=async(n=4)=>{for(let i=0;i<n;i++)await new Promise(requestAnimationFrame);};
+const pref={ai:0,mate:1,box:1,loot:1,container:1,fpvheight:1.6};
+try{
+ const radar=create({pref,onToast:m=>console.log(m)});radar.setQuality('performance');radar.setCam('chase');
+ document.getElementById('follow').onclick=()=>radar.setCam('chase');
+ document.getElementById('fpv').onclick=()=>radar.setCam('fpv');
+ let snapshot=await (await fetch('/reported-state.json')).json();radar.update(snapshot);await frames();
+ const expected=snapshot.entities.filter(e=>['player','mate','unknown'].includes(e.kind)&&e.world?.every(Number.isFinite));
+ let state=gateway.inspect();
+ assert(JSON.stringify(state.entities.filter(e=>e.kind==='players').map(e=>e.key).sort())===JSON.stringify(expected.map(e=>e.key).sort()),'reported state character parity');
+ for(const e of expected){const actual=state.entities.find(x=>x.key===e.key);assert(near(actual.position,[e.world[0]/100,-e.world[1]/100,e.world[2]/100]),'reported xyz '+e.key);}
+ checks.push('Reported state: 2D/3D identities and exact rendered XYZ match');
+ const entity=(i)=>({key:'p'+i,name:'同名',kind:i===0?'mate':i===1?'unknown':'player',is_bot:i%2===0,out_of_range:i===2,world:[10000+i*1000,20000-i*700,100+i*50],yaw:i*10,hp:100});
+ snapshot={session:'synthetic',self:[10000,20000,100],self_yaw:0,self_pitch:0,entities:[...Array.from({length:130},(_,i)=>entity(i)),{key:'ai',kind:'ai',world:[0,0,0],yaw:0},{key:'box',kind:'box',is_bot:true,world:[0,0,0]}]};
+ radar.update(snapshot);await frames();state=gateway.inspect();
+ assert(state.entities.filter(e=>e.kind==='players').length===130,'130 characters with AI disabled');
+ assert(!state.entities.some(e=>e.kind==='ais'),'AI toggle does not affect player bots');
+ assert(state.entities.find(e=>e.key==='p2').label.includes('超距·最后位置'),'last-known coordinate label');
+ checks.push('130 same-name characters including player bots rendered with AI disabled');
+ snapshot={...snapshot,entities:snapshot.entities.slice().reverse().map(e=>({...e,world:e.world.map(v=>v+1234)}))};
+ radar.update(snapshot);await frames(2);state=gateway.inspect();
+ for(const e of snapshot.entities.filter(e=>e.key.startsWith('p'))){assert(near(state.entities.find(x=>x.key===e.key).position,[e.world[0]/100,-e.world[1]/100,e.world[2]/100]),'reordered xyz '+e.key);}
+ checks.push('Reordered pool and large jumps retain exact per-actor XYZ');
+ for(const model3d of ['tactical','mannequin','beacon','capsule']){
+  for(const charsize of [50,100,200]){
+   radar.setPrefs({...pref,model3d,charsize});await frames();const actors=gateway.inspect().entities.filter(e=>e.kind==='players');
+   assert(actors.length===130&&actors.every(e=>e.model===model3d),'all actor models switch '+model3d);
+   assert(actors.every(e=>Math.abs(e.modelRenderedFootZ+.9)<1e-8),'model foot '+model3d+' '+charsize+'%');
+   for(const e of snapshot.entities.filter(e=>e.key.startsWith('p')))assert(near(actors.find(x=>x.key===e.key).position,[e.world[0]/100,-e.world[1]/100,e.world[2]/100]),'model keeps xyz');
+  }
+ }
+ checks.push('All four model styles switch at 50/100/200%, keep exact XYZ and share the capsule foot plane');
+ radar.setPrefs({...pref,model3d:'tactical',charsize:160,visiblecolor3d:'#123456',occludedcolor3d:'#fedcba',dist:1});await frames(3);state=gateway.inspect();
+ const nearActor=state.entities.find(e=>e.key==='p0'),farActor=state.entities.find(e=>e.key==='p100');
+ assert(nearActor.customVisible&&nearActor.occludedModelVisible,'selected shape used for visible and occluded passes');
+ assert(nearActor.visibleColor===0x123456&&nearActor.occludedColor===0xfedcba,'visible and occluded colors');
+  assert(Math.abs(nearActor.modelFootZ+.9)<1e-8&&Math.abs(nearActor.modelRenderedFootZ+.9)<1e-8,'scaled model geometry keeps capsule foot plane');
+ assert(nearActor.labelPosition[2]<-.9&&nearActor.labelShowsDistance&&Number.isFinite(nearActor.labelRange),'label is under feet and includes coordinate distance');
+ assert(nearActor.labelScreenHeight>farActor.labelScreenHeight&&farActor.labelScreenHeight===18,'distance scales label screen size');
+ checks.push('Selected visible/occluded models share shape and colors; foot plane fixed; transparent labels shrink with distance');
+ radar.setPrefs({...pref,model3d:'tactical',cone:1,directionstyle3d:'line',directionanchor3d:'foot',visiblecolor3d:'#123456',occludedcolor3d:'#fedcba'});await frames(2);state=gateway.inspect();
+ const headingActor=state.entities.find(e=>e.key==='p0');
+ assert(headingActor.headingStyle==='line'&&headingActor.headingAnchor==='foot','line/foot heading preference');
+ assert(headingActor.headingVisible&&headingActor.headingOccluded,'heading visible in both depth passes');
+ assert(Math.abs(headingActor.headingZ+.82)<1e-8,'foot heading anchor');
+ radar.setPrefs({...pref,model3d:'tactical',cone:1,directionstyle3d:'arrow',directionanchor3d:'head'});await frames(2);state=gateway.inspect();
+ assert(state.entities.find(e=>e.key==='p0').headingStyle==='arrow'&&state.entities.find(e=>e.key==='p0').headingAnchor==='head','arrow/head heading preference');
+ checks.push('3D direction switches arrow/line and head/foot; visible and occluded passes stay enabled');
+ radar.setPrefs({...pref,mate:0});radar.update(snapshot);await frames();
+ assert(gateway.inspect().entities.filter(e=>e.kind==='players').length===129,'mate filter');
+ radar.setPrefs({...pref,ai:1});radar.update(snapshot);await frames(20);
+ assert(gateway.inspect().entities.filter(e=>e.kind==='ais').length===1,'AI enabled only genuine AI');
+ checks.push('Mate and AI visibility filters are independent');
+ radar.setPrefs(pref);radar.setCam('fpv');
+ for(const [yaw,pitch] of [[0,0],[90,30],[180,-30],[270,60],[359,-75]]){
+  snapshot={...snapshot,self_aim_yaw:yaw,self_aim_age_ms:0,self_pitch:pitch};radar.update(snapshot);await frames();state=gateway.inspect();
+  const y=-yaw*Math.PI/180,p=pitch*Math.PI/180;
+  assert(near(state.camera.direction,[Math.cos(y)*Math.cos(p),Math.sin(y)*Math.cos(p),Math.sin(p)]),'FPV direction '+yaw+','+pitch);
+  assert(near(state.camera.position,[100,-200,2.6]),'FPV eye position');
+ }
+ checks.push('First-person continuously tracks 5 changing yaw/pitch poses and eye height');
+ const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute([0,0,0,10,0,0,0,10,0,0,0,0,0,10,0,0,0,10],3));
+ gateway.installGeometry('nonindexed-test',geo);await frames();state=gateway.inspect();
+ assert(Math.abs(state.walls.opacity-.22)<1e-8&&state.walls.depthWrite===false&&state.walls.cutout===false,'transparent walls without cutout');
+ assert(state.walls.counts.floor===1&&state.walls.counts.wall===1,'all triangles retained');
+ checks.push('Nonindexed map keeps all triangles; walls 22% opaque with no cutout');
+ for(const [walltrans,floortrans] of [[0,0],[35,15],[100,100],[78,0]]) {
+  radar.setPrefs({...pref,walltrans,floortrans,fov:90});await frames();state=gateway.inspect();
+  assert(Math.abs(state.walls.opacity-(1-walltrans/100))<1e-8,'wall opacity '+walltrans);
+  assert(Math.abs(state.surfaces.floorOpacity-(1-floortrans/100))<1e-8,'floor opacity '+floortrans);
+  assert(state.walls.depthWrite===(walltrans===0),'wall depth write '+walltrans);
+  assert(state.camera.fov===90,'instant FOV');
+  assert(state.walls.counts.floor===1&&state.walls.counts.wall===1,'opacity preserves geometry');
+ }
+ radar.setQuality('balanced');await frames();assert(Math.abs(gateway.inspect().walls.opacity-.22)<1e-8,'quality preserves transparency');
+ radar.setPrefs({...pref,walltrans:64,floortrans:10,fov:58});
+ checks.push('Wall/floor 0..100% live updates, depth write, FOV and quality preservation');
+ snapshot=await (await fetch('/reported-state.json')).json();snapshot={...snapshot,replay:{paused:true,position:1},self_pitch:0};radar.update(snapshot);radar.setCam('chase');
+ output.textContent=checks.join('\n')+'\nLoading real Daba map…';
+ await frames();const cameraBeforeMap=gateway.inspect().camera;
+ const manifest=await (await fetch('/m3d/manifest.json')).json();await radar.setMap({key:'daba'},'/m3d/'+manifest.maps.daba.file);await frames(3);
+ assert(near(gateway.inspect().camera.position,cameraBeforeMap.position),'loading map preserves follow camera');
+ state=gateway.inspect();assert(!radar.stat().err,'map loading');assert(radar.stat().tris===5293593,'real map triangle preservation');assert(state.walls.cutout===false&&Math.abs(state.walls.opacity-.36)<1e-8&&Math.abs(state.surfaces.floorOpacity-.9)<1e-8,'real map preserves pre-load transparency');assert(errors.length===0,'browser errors '+errors.join(';'));
+ checks.push('Real Daba map: 5,293,593 triangles, transparent walls, no cutout; camera preserved');
+ const result={passed:true,checks,scene:state,stats:radar.stat(),errors};output.textContent=JSON.stringify(result,null,2);document.title='PASS V1.1.0 WebGL';
+ await fetch('/results',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(result,null,2)});
+}catch(error){output.textContent=JSON.stringify({passed:false,checks,error:String(error),stack:error.stack,errors},null,2);document.title='FAIL V1.1.0 WebGL';await fetch('/results',{method:'POST',body:output.textContent});console.error(error);}
+</script>
+

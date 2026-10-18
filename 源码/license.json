@@ -1,0 +1,4 @@
+{
+  "_comment": "把 server 改成你的卡密服务地址，例如 https://license.example.com；留空则使用程序内置地址。",
+  "server": ""
+}

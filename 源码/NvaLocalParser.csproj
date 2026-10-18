@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <Version>1.1.0</Version>
+    <AssemblyName>Nva本地离线解析</AssemblyName>
+    <RootNamespace>GatewayCapture</RootNamespace>
+    <Product>TQ</Product>
+    <Title>TQ</Title>
+    <Description>TQ · 实时 UDP 解析与 2D/3D 可视化</Description>
+    <Company>TQ</Company>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ParserExecutable Condition="'$(ParserExecutable)' == ''">$(MSBuildProjectDirectory)\build\parser-dist\NvaParser.exe</ParserExecutable>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="dependencies\WinDivert-2.2.2\WinDivert.dll" Link="WinDivert.dll" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+    <None Include="dependencies\WinDivert-2.2.2\WinDivert64.sys" Link="WinDivert64.sys" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+    <EmbeddedResource Include="$(ParserExecutable)" LogicalName="NvaLocalParser.Embedded.NvaParser.exe" Condition="'$(EmbedNvaParser)' == 'true'" />
+  </ItemGroup>
+  <Target Name="RequireEmbeddedParser" BeforeTargets="PrepareForBuild" Condition="'$(EmbedNvaParser)' == 'true' and !Exists('$(ParserExecutable)')">
+    <Error Text="Build NvaParser.exe before publishing the embedded runtime." />
+  </Target>
+</Project>

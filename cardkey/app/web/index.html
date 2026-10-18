@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>TQ 卡密管理</title>
+  <link rel="icon" href="/favicon.ico" type="image/svg+xml">
+  <link rel="stylesheet" href="/assets/app.css">
+  <script src="/assets/app.js" defer></script>
+</head>
+<body>
+
+<div id="login-view" class="login-shell" hidden>
+  <form id="login-form" class="login-card card" novalidate>
+    <div class="brand big"><span class="brand-mark">TQ</span><span>卡密管理</span></div>
+    <p class="muted">输入管理密钥进入后台。密钥只保存在当前标签页，关闭标签页即失效。</p>
+    <div class="field">
+      <label for="admin-key">管理密钥</label>
+      <input id="admin-key" type="password" autocomplete="current-password" required>
+    </div>
+    <p id="login-error" class="error" role="alert"></p>
+    <button class="btn btn-primary btn-block" type="submit">登录</button>
+  </form>
+</div>
+
+<div id="app-view" hidden>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark">TQ</span><span>卡密管理</span></div>
+    <div class="top-actions">
+      <span id="key-status" class="muted"></span>
+      <button id="theme-toggle" class="btn btn-ghost" type="button">深色</button>
+      <button id="logout" class="btn btn-ghost" type="button">退出</button>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="sidebar" aria-label="主导航">
+      <a href="#/overview" data-nav="overview">概览</a>
+      <a href="#/batches" data-nav="batches">批次</a>
+      <a href="#/batches/new" data-nav="new">生成批次</a>
+      <a href="#/cards" data-nav="cards">卡密</a>
+      <a href="#/logs" data-nav="logs">日志</a>
+      <a href="#/settings" data-nav="settings">设置</a>
+    </nav>
+
+    <main class="main">
+      <section id="view-overview" hidden>
+        <h1>概览</h1>
+        <div id="stat-grid" class="stat-grid"></div>
+        <div class="card">
+          <div class="card-head"><h2>产品维度</h2></div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>产品</th><th class="num">总数</th><th class="num">未使用</th><th class="num">已使用</th><th class="num">已作废</th><th class="num">已过期</th></tr></thead>
+              <tbody id="product-body"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>最近失败</h2></div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>时间</th><th>卡号</th><th>原因</th><th>IP</th><th>设备</th></tr></thead>
+              <tbody id="recent-log-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section id="view-batches" hidden>
+        <div class="view-head">
+          <h1>批次</h1>
+          <a class="btn btn-primary" href="#/batches/new">生成批次</a>
+        </div>
+        <div class="card">
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>批次号</th><th>产品</th><th>备注</th><th class="num">总数</th><th class="num">未用</th><th class="num">已用</th><th class="num">作废</th><th class="num">过期</th><th>时长</th><th>创建时间</th><th>操作</th></tr></thead>
+              <tbody id="batch-body"></tbody>
+            </table>
+          </div>
+          <div id="batch-pager" class="pager"></div>
+        </div>
+      </section>
+
+      <section id="view-new" hidden>
+        <h1>生成批次</h1>
+        <form id="generate-form" class="card form-card" novalidate>
+          <div class="field">
+            <label for="g-product">产品</label>
+            <input id="g-product" list="product-list" maxlength="64" required autocomplete="off" placeholder="例如 tq">
+            <datalist id="product-list"></datalist>
+          </div>
+          <div class="field">
+            <label for="g-count">数量</label>
+            <input id="g-count" type="number" min="1" max="100000" value="10" required>
+          </div>
+          <div class="field">
+            <label for="g-days">时长（天）</label>
+            <input id="g-days" type="number" min="0" max="3650" value="30">
+            <p class="hint">0 = 永久；从激活时刻起算。</p>
+          </div>
+          <div class="field">
+            <label for="g-note">备注</label>
+            <input id="g-note" maxlength="255">
+          </div>
+          <div class="field check">
+            <label><input id="g-with-pwd" type="checkbox"> 同时生成卡密密码（第二因子）</label>
+          </div>
+          <div class="field" id="g-pwd-field" hidden>
+            <label for="g-pwd-length">密码长度</label>
+            <input id="g-pwd-length" type="number" min="4" max="32" value="8">
+          </div>
+          <p id="g-hint" class="hint warn" hidden>数量超过 5000，建议用命令行 <code>manage.py gen -o</code> 导出，避免浏览器卡顿。</p>
+          <p id="generate-error" class="error" role="alert"></p>
+          <div class="form-actions">
+            <button class="btn btn-primary" type="submit">生成</button>
+          </div>
+        </form>
+      </section>
+
+      <section id="view-cards" hidden>
+        <h1>卡密</h1>
+        <form id="card-filter" class="card filter-bar" novalidate>
+          <input id="f-card-no" placeholder="卡号精确搜索" maxlength="64">
+          <input id="f-batch" placeholder="批次号" maxlength="32">
+          <select id="f-product"><option value="">全部产品</option></select>
+          <select id="f-status">
+            <option value="">全部状态</option>
+            <option value="0">未使用</option>
+            <option value="1">已使用</option>
+            <option value="2">已作废</option>
+          </select>
+          <button class="btn btn-primary" type="submit">查询</button>
+          <button class="btn btn-ghost" type="button" id="f-reset">重置</button>
+        </form>
+        <div class="card">
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>卡号</th><th>批次</th><th>产品</th><th>状态</th><th class="num">时长</th><th>到期</th><th>使用时间</th><th>使用设备</th><th>操作</th></tr></thead>
+              <tbody id="card-body"></tbody>
+            </table>
+          </div>
+          <div id="card-pager" class="pager"></div>
+        </div>
+      </section>
+
+      <section id="view-logs" hidden>
+        <h1>日志</h1>
+        <form id="log-filter" class="card filter-bar" novalidate>
+          <select id="l-ok">
+            <option value="">全部结果</option>
+            <option value="1">成功</option>
+            <option value="0">失败</option>
+          </select>
+          <select id="l-prefix">
+            <option value="">全部类型</option>
+            <option value="verify:">仅校验失败</option>
+          </select>
+          <input id="l-card" placeholder="卡号（可选）" maxlength="64">
+          <button class="btn btn-primary" type="submit">查询</button>
+        </form>
+        <div class="card">
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>时间</th><th>卡号</th><th>类型</th><th>结果</th><th>原因</th><th>IP</th><th>设备</th></tr></thead>
+              <tbody id="log-body"></tbody>
+            </table>
+          </div>
+          <div id="log-pager" class="pager"></div>
+        </div>
+      </section>
+
+      <section id="view-settings" hidden>
+        <h1>设置</h1>
+        <div class="card form-card">
+          <h2>外观</h2>
+          <div class="field">
+            <label for="s-theme">主题</label>
+            <select id="s-theme">
+              <option value="light">浅色</option>
+              <option value="dark">深色</option>
+            </select>
+          </div>
+          <h2>登录状态</h2>
+          <p>管理密钥：<strong id="s-key-state">已登录</strong></p>
+          <button class="btn btn-danger" id="s-logout" type="button">退出登录</button>
+          <h2>安全说明</h2>
+          <ul class="notes">
+            <li>密钥只保存在当前标签页（sessionStorage），关闭标签页即失效。</li>
+            <li>明文卡密只在生成结果和查看对话框中显示，不写入浏览器存储。</li>
+            <li>生产环境请使用 HTTPS，并建议在 Nginx 层再加 IP 白名单。</li>
+            <li>客户端卡密校验可被修改二进制绕过，本后台只做授权管理。</li>
+          </ul>
+        </div>
+      </section>
+    </main>
+  </div>
+</div>
+
+<dialog id="reveal-dialog">
+  <form method="dialog" class="dialog-body">
+    <h2>卡密明文</h2>
+    <div class="field">
+      <label for="reveal-card">卡号</label>
+      <div class="copy-row">
+        <input id="reveal-card" readonly>
+        <button class="btn" type="button" data-copy="reveal-card">复制</button>
+      </div>
+    </div>
+    <div class="field" id="reveal-pwd-field">
+      <label for="reveal-pwd">密码</label>
+      <div class="copy-row">
+        <input id="reveal-pwd" readonly>
+        <button class="btn" type="button" data-copy="reveal-pwd">复制</button>
+      </div>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-primary" value="close">关闭</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="result-dialog">
+  <div class="dialog-body">
+    <h2>生成成功</h2>
+    <p class="alert" role="alert">明文卡密只显示这一次。刷新、离开或关闭后无法再次查看，请立即复制或下载。</p>
+    <p id="result-summary" class="muted"></p>
+    <textarea id="result-text" readonly rows="12" spellcheck="false"></textarea>
+    <div class="form-actions">
+      <button class="btn" type="button" id="result-copy">复制全部</button>
+      <button class="btn btn-primary" type="button" id="result-download">下载 CSV</button>
+      <button class="btn btn-danger" type="button" id="result-close">已保存，关闭</button>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="confirm-dialog">
+  <form method="dialog" class="dialog-body">
+    <h2 id="confirm-title">请确认</h2>
+    <p id="confirm-message"></p>
+    <div class="form-actions">
+      <button class="btn" value="cancel">取消</button>
+      <button class="btn btn-danger" value="ok">确定</button>
+    </div>
+  </form>
+</dialog>
+
+<div id="toasts" aria-live="polite"></div>
+
+</body>
+</html>
