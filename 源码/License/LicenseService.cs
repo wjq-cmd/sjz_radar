@@ -57,51 +57,84 @@ internal static class LicenseService
         }
 
         var deviceId = DeviceId();
+        // 本地授权只用于离线宽限和卡号比对；每次启动仍然要求输入卡密。
         var state = LoadState(deviceId);
-        if (state is null)
+        var cardNo = PromptCardKey();
+        if (cardNo is null)
         {
-            return await ActivateAsync(server, deviceId);
+            Fail("激活未完成。");
+            return false;
         }
 
-        var response = await CallAsync(server, "/verify", new { card_no = state.CardNo, device_id = deviceId });
+        // 已激活的卡走 /verify（幂等）；未激活的卡回退到 /redeem。
+        var response = await CallAsync(server, "/verify",
+            new { card_no = cardNo, device_id = deviceId });
         if (response is null)
         {
-            return OfflineFallback(state);
+            if (state is not null &&
+                string.Equals(state.CardNo, cardNo, StringComparison.Ordinal))
+            {
+                return OfflineFallback(state);
+            }
+            Fail("无法连接激活服务器，请检查网络后重试。");
+            return false;
         }
 
         if (response.Code == 0)
         {
-            state.ExpiresAt = response.ExpiresAt;
-            state.LastOkServerTime = response.ServerTime ?? DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            state.LastOkLocalUtc = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
-            SaveState(state, deviceId);
-            return CheckExpiry(state);
+            SaveVerifiedState(cardNo, response, deviceId);
+            return CheckExpiry(new LicenseState
+            {
+                CardNo = cardNo,
+                ExpiresAt = response.ExpiresAt,
+            });
         }
 
-        // 1001 = 核销失败，1002 = 校验失败（不存在/作废/过期/未激活）
-        if (response.Code is 1001 or 1002)
+        if (response.Code == 1002 && response.Msg.Contains("尚未激活", StringComparison.Ordinal))
         {
-            Fail(response.Msg);
-            if (response.Msg.Contains("不存在", StringComparison.Ordinal))
+            var redeem = await CallAsync(server, "/redeem",
+                new { card_no = cardNo, device_id = deviceId });
+            if (redeem is null)
             {
-                Console.WriteLine("本地授权可能来自另一台机器或已被清理，请重新输入卡密。");
-                TryDeleteState();
+                Fail("无法连接激活服务器，请检查网络后重试。");
+                return false;
             }
+            if (redeem.Code == 0)
+            {
+                SaveVerifiedState(cardNo, redeem, deviceId);
+                Console.WriteLine(redeem.ExpiresAt is long exp
+                    ? $"[授权] 激活成功，有效期至 {DateTimeOffset.FromUnixTimeSeconds(exp).ToLocalTime():yyyy-MM-dd HH:mm}。"
+                    : "[授权] 激活成功，永久有效。");
+                return true;
+            }
+            Fail($"激活失败：{redeem.Msg}");
             return false;
         }
 
-        Fail($"授权校验失败：{response.Msg}（code={response.Code}）");
+        Fail(response.Msg);
         return false;
     }
 
-    // ---------------------------------------------------------------- 激活
+    private static void SaveVerifiedState(string cardNo, LicenseResponse response, string deviceId)
+    {
+        SaveState(new LicenseState
+        {
+            CardNo = cardNo,
+            Product = response.Product ?? "",
+            ExpiresAt = response.ExpiresAt,
+            LastOkServerTime = response.ServerTime ?? DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+            LastOkLocalUtc = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture),
+            DeviceId = deviceId,
+        }, deviceId);
+    }
 
-    private static async Task<bool> ActivateAsync(string server, string deviceId)
+    /// <summary>每次启动都要求输入卡密。</summary>
+    private static string? PromptCardKey()
     {
         Console.WriteLine();
         Console.WriteLine("============================================================");
-        Console.WriteLine("  首次使用需要激活");
-        Console.WriteLine("  请输入购买得到的卡密，形如 XXXX-XXXX-XXXX-XXXX-XXXX");
+        Console.WriteLine("  请输入卡密（每次启动都需要验证）");
+        Console.WriteLine("  格式：XXXX-XXXX-XXXX-XXXX-XXXX");
         Console.WriteLine("============================================================");
 
         for (var attempt = 1; attempt <= 3; attempt++)
@@ -113,44 +146,9 @@ internal static class LicenseService
                 Console.WriteLine("卡密不能为空。");
                 continue;
             }
-
-            var cardNo = NormalizeCard(input);
-            var response = await CallAsync(server, "/redeem", new { card_no = cardNo, device_id = deviceId });
-            if (response is null)
-            {
-                Fail("无法连接激活服务器，请检查网络后重试。");
-                return false;
-            }
-
-            if (response.Code == 0)
-            {
-                var state = new LicenseState
-                {
-                    CardNo = cardNo,
-                    Product = response.Product ?? "",
-                    ExpiresAt = response.ExpiresAt,
-                    LastOkServerTime = response.ServerTime ?? DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
-                    LastOkLocalUtc = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture),
-                    DeviceId = deviceId,
-                };
-                SaveState(state, deviceId);
-                Console.WriteLine();
-                Console.WriteLine(response.ExpiresAt is long exp
-                    ? $"[授权] 激活成功，有效期至 {DateTimeOffset.FromUnixTimeSeconds(exp).ToLocalTime():yyyy-MM-dd HH:mm}。"
-                    : "[授权] 激活成功，永久有效。");
-                return true;
-            }
-
-            Console.WriteLine($"激活失败：{response.Msg}");
-            if (response.Msg.Contains("已被使用", StringComparison.Ordinal)
-                || response.Msg.Contains("作废", StringComparison.Ordinal))
-            {
-                break; // 重试没有意义
-            }
+            return NormalizeCard(input);
         }
-
-        Fail("激活未完成。");
-        return false;
+        return null;
     }
 
     // ---------------------------------------------------------------- 网络
@@ -274,8 +272,16 @@ internal static class LicenseService
             if (state is null || string.IsNullOrWhiteSpace(state.CardNo)) return null;
             if (!string.Equals(state.Sig, ComputeSignature(state, deviceId), StringComparison.Ordinal))
             {
-                Console.WriteLine("[授权] 本地授权文件校验失败，需要重新激活。");
-                return null;
+                // 兼容旧版本：旧 device_id 包含完整 OSVersion，Windows 更新或 manifest
+                // 变化后当前机器算出的 device_id 会变。只要文件自身签名自洽就先接受，
+                // 下一次在线校验成功会写回新的 device_id 和签名（自动迁移）。
+                if (string.IsNullOrWhiteSpace(state.DeviceId) ||
+                    !string.Equals(state.Sig, ComputeSignature(state, state.DeviceId),
+                        StringComparison.Ordinal))
+                {
+                    Console.WriteLine("[授权] 本地授权文件校验失败，需要重新激活。");
+                    return null;
+                }
             }
             return state;
         }
@@ -321,6 +327,46 @@ internal static class LicenseService
         return Convert.ToHexString(HMACSHA256.HashData(key, Encoding.UTF8.GetBytes(payload))).ToLowerInvariant();
     }
 
+    /// <summary>开发诊断：打印当前设备 ID、本地授权字段和签名校验结果。</summary>
+    public static void PrintDiagnostics()
+    {
+        var deviceId = DeviceId();
+        Console.WriteLine("device_id: " + deviceId);
+        Console.WriteLine("machine: " + Environment.MachineName);
+        try { Console.WriteLine("sid: " + (WindowsIdentity.GetCurrent().User?.Value ?? "")); }
+        catch (Exception ex) { Console.WriteLine("sid: <error " + ex.Message + ">"); }
+        Console.WriteLine("os: " + Environment.OSVersion.VersionString);
+        Console.WriteLine("storage: " + StatePath);
+        if (!File.Exists(StatePath))
+        {
+            Console.WriteLine("license: missing");
+            return;
+        }
+        try
+        {
+            var state = JsonSerializer.Deserialize<LicenseState>(
+                File.ReadAllText(StatePath), JsonOptions);
+            if (state is null)
+            {
+                Console.WriteLine("license: cannot deserialize");
+                return;
+            }
+            Console.WriteLine("card_no: " + state.CardNo);
+            Console.WriteLine("stored_device_id: " + state.DeviceId);
+            Console.WriteLine("expires_at: " + state.ExpiresAt);
+            Console.WriteLine("last_ok_server_time: " + state.LastOkServerTime);
+            Console.WriteLine("last_ok_local_utc: " + state.LastOkLocalUtc);
+            Console.WriteLine("sig_match: " + string.Equals(
+                state.Sig, ComputeSignature(state, deviceId), StringComparison.Ordinal));
+            Console.WriteLine("legacy_sig_match: " + string.Equals(
+                state.Sig, ComputeSignature(state, state.DeviceId), StringComparison.Ordinal));
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("read error: " + ex);
+        }
+    }
+
     // ---------------------------------------------------------------- 工具
 
     private static string ResolveServer()
@@ -364,12 +410,32 @@ internal static class LicenseService
         }
         catch (Exception)
         {
-            // 极端环境下取不到 SID，退化为机器名 + 系统版本
+            // 极端环境下取不到 SID，退化为机器名 + 主版本号
         }
 
-        var raw = $"{Environment.MachineName}|{sid}|{Environment.OSVersion.VersionString}|{SignatureSalt}";
+        // 注意：不要用完整的 Environment.OSVersion.VersionString。
+        // 它会受 app.manifest 兼容性声明和 Windows 更新的影响，
+        // 同一台机器升级系统后 device_id 会变，导致授权文件失效。
+        var machineGuid = MachineGuid();
+        var raw = string.IsNullOrEmpty(machineGuid)
+            ? $"{Environment.MachineName}|{sid}|{Environment.OSVersion.Version.Major}|{SignatureSalt}"
+            : $"{machineGuid}|{sid}|{Environment.MachineName}|{SignatureSalt}";
         var digest = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(raw))).ToLowerInvariant();
         return digest[..32];
+    }
+
+    private static string MachineGuid()
+    {
+        try
+        {
+            return Microsoft.Win32.Registry.GetValue(
+                @"HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Cryptography",
+                "MachineGuid", null) as string ?? "";
+        }
+        catch (Exception)
+        {
+            return "";
+        }
     }
 
     private static string NormalizeCard(string value)

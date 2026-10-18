@@ -12,7 +12,11 @@ internal sealed class TcpRelayServer : IAsyncDisposable
     private readonly Func<IPEndPoint, IPEndPoint?> _resolve;
     private readonly Action<string, object> _event;
     private readonly Action<long, TgcpObservation> _observe;
+    private readonly IPAddress? _upstreamBind;
+    private readonly int _idleTimeoutMs;
     private readonly CancellationTokenSource _stop = new();
+    // 本机模式下：上游 socket 在 connect 前先绑定并上报端口，供本地路由器排除。
+    public Action<int>? OnUpstreamBound { get; set; }
     private readonly ConcurrentDictionary<long, Task> _tasks = new();
     private readonly ConcurrentDictionary<long, TcpClient> _clients = new();
     private Task? _accept;
@@ -23,9 +27,13 @@ internal sealed class TcpRelayServer : IAsyncDisposable
     public int ActiveConnections => _clients.Count;
 
     public TcpRelayServer(IPAddress bind, int port, Func<IPEndPoint, IPEndPoint?> resolve,
-        Action<string, object> report, Action<long, TgcpObservation> observe)
+        Action<string, object> report, Action<long, TgcpObservation> observe,
+        IPAddress? upstreamBind = null, Action<int>? onUpstreamBound = null,
+        int idleTimeoutMs = 60000)
     {
         _listener = new(bind, port); _resolve = resolve; _event = report; _observe = observe;
+        _upstreamBind = upstreamBind; OnUpstreamBound = onUpstreamBound;
+        _idleTimeoutMs = idleTimeoutMs;
     }
     public void Start() { _listener.Start(128); _accept = AcceptAsync(); }
     private async Task AcceptAsync()
@@ -49,7 +57,9 @@ internal sealed class TcpRelayServer : IAsyncDisposable
     private async Task RunAsync(long id, TcpClient client)
     {
         using (client)
-        using (var upstream = new TcpClient(AddressFamily.InterNetwork))
+        using (var upstream = _upstreamBind is null
+            ? new TcpClient(AddressFamily.InterNetwork)
+            : new TcpClient(new IPEndPoint(_upstreamBind, 0)))
         using (var cancel = CancellationTokenSource.CreateLinkedTokenSource(_stop.Token))
         {
             var token = cancel.Token;
@@ -64,6 +74,10 @@ internal sealed class TcpRelayServer : IAsyncDisposable
             {
                 var remote = (IPEndPoint)client.Client.RemoteEndPoint!;
                 var destination = _resolve(remote) ?? throw new InvalidOperationException("TCP 原目标映射已过期。");
+                if (_upstreamBind is not null && upstream.Client.LocalEndPoint is IPEndPoint upstreamLocal)
+                {
+                    OnUpstreamBound?.Invoke(upstreamLocal.Port);
+                }
                 await upstream.ConnectAsync(destination.Address, destination.Port, token).AsTask().WaitAsync(TimeSpan.FromSeconds(5), token);
                 client.NoDelay = upstream.NoDelay = true;
                 var input = new[] { client.GetStream(), upstream.GetStream() };
@@ -146,7 +160,7 @@ internal sealed class TcpRelayServer : IAsyncDisposable
                     {
                         await Task.Delay(200, token); long now = Environment.TickCount64;
                         if (session is not null && session.State != 2 && now - handshakeStart > 6000) throw new TimeoutException("TGCP 握手超时。");
-                        if (now - Interlocked.Read(ref lastActivity) > 60000) throw new TimeoutException("TCP 空闲超时。");
+                        if (now - Interlocked.Read(ref lastActivity) > _idleTimeoutMs) throw new TimeoutException("TCP 空闲超时。");
                         long eof = Interlocked.Read(ref firstEof);
                         if (eof != 0 && now - eof > 5000) throw new TimeoutException("TCP 半关闭超时。");
                     }

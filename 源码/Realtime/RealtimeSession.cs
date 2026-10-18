@@ -11,6 +11,7 @@ internal sealed class RealtimeSession : IAsyncDisposable
     private UdpKeyBroker? _broker;
     private TcpRelayServer? _relay;
     private HotspotTcpRouter? _router;
+    private LocalCaptureRouter? _localRouter;
     private string? _directory;
     private bool _disposed;
     private readonly CancellationTokenSource _statusStop = new();
@@ -19,21 +20,26 @@ internal sealed class RealtimeSession : IAsyncDisposable
     public int Port => _output?.Port ?? 0;
     public string? WebUrl => _parser?.Url;
     public void OpenBrowser() => _parser?.OpenBrowser();
-    public bool Running => !_disposed && _router?.Running == true;
+    public bool Running => !_disposed && (_router?.Running == true || _localRouter?.Running == true);
     private readonly DateTimeOffset _started = DateTimeOffset.Now;
     public object Snapshot => new { running = Running, events = _output?.Events ?? 0, journalBytes = _output?.JournalBytes ?? 0,
         udpUpPackets = _broker?.UpPackets ?? 0, udpDownPackets = _broker?.DownPackets ?? 0,
         udpUpBytes = _broker?.UpBytes ?? 0, udpDownBytes = _broker?.DownBytes ?? 0,
         plainUp = _broker?.PlainUp ?? 0, plainDown = _broker?.PlainDown ?? 0,
         invalidPackets = _broker?.InvalidPackets ?? 0, pendingPackets = _broker?.PendingCount ?? 0, activeTcp = _relay?.ActiveConnections ?? 0, tgcpEstablished = _relay?.Established ?? 0,
-        redirectedUp = _router?.RedirectedUp ?? 0, redirectedDown = _router?.RedirectedDown ?? 0, unmappedTcp = _router?.Unmapped ?? 0,
+        redirectedUp = _router?.RedirectedUp ?? _localRouter?.RedirectedUp ?? 0,
+        redirectedDown = _router?.RedirectedDown ?? _localRouter?.RedirectedDown ?? 0,
+        unmappedTcp = _router?.Unmapped ?? _localRouter?.Unmapped ?? 0,
         suppressedOriginalDown = _router?.SuppressedOriginalDown ?? 0,
-        bankCandidates = _broker?.CandidateCount ?? 0, udpObserved = _router?.UdpObserved ?? 0, udpPlainPackets = _broker?.PlainPackets ?? 0,
+        bankCandidates = _broker?.CandidateCount ?? 0,
+        udpObserved = _router?.UdpObserved ?? _localRouter?.UdpObserved ?? 0,
+        udpPlainPackets = _broker?.PlainPackets ?? 0,
         udpBoundFlows = _broker?.ValidatedFlows ?? 0, outputClients = _output?.ClientCount ?? 0,
         archiveDropped = _output?.ArchiveDropped ?? 0, slowClientsDisconnected = _output?.SlowClients ?? 0,
         archiveError = _output?.ArchiveError, outputListenerError = _output?.ListenerError,
-        pendingUdpEvictions = _broker?.PendingEvictions ?? 0, packetSendErrors = _router?.SendErrors ?? 0,
-        packetReceiveErrors = _router?.ReceiveErrors ?? 0, parser = _parser?.Snapshot };
+        pendingUdpEvictions = _broker?.PendingEvictions ?? 0,
+        packetSendErrors = _router?.SendErrors ?? _localRouter?.SendErrors ?? 0,
+        packetReceiveErrors = _router?.ReceiveErrors ?? _localRouter?.ReceiveErrors ?? 0, parser = _parser?.Snapshot };
     public async Task StartAsync(IPAddress target, string directory, int outputPort = 17890, int webPort = 17891)
     {
         _directory = directory;
@@ -65,6 +71,74 @@ internal sealed class RealtimeSession : IAsyncDisposable
         }
         catch { await DisposeAsync(); throw; }
     }
+    /// <summary>
+    /// 本机模式：同一台电脑既跑游戏又跑工具。
+    /// 不依赖热点/Wi-Fi Direct，直接在本机 layer 0 拦截游戏到 TGCP 服务器的 TCP。
+    /// </summary>
+    public async Task StartLocalAsync(
+        IPAddress localIp,
+        IPAddress? serverIp,
+        int serverPort,
+        string directory,
+        int outputPort = 17890,
+        int webPort = 17891,
+        IPAddress? udpServerIp = null,
+        int udpServerPort = 0)
+    {
+        _directory = directory;
+        Directory.CreateDirectory(directory);
+        File.Delete(Path.Combine(directory, "realtime-result.json"));
+        try
+        {
+            _output = new(directory, outputPort);
+            _output.Start();
+            _parser = new();
+            await _parser.StartAsync(Path.Combine(directory, "semantic"), webPort, cacheOnly: true,
+                journal: Path.Combine(directory, "realtime.jsonl"));
+            _broker = new(directory, _output.Publish);
+
+            LocalCaptureRouter? router = null;
+            _relay = new(localIp, 0, endpoint => router?.Resolve(endpoint), _output.Publish, _broker.Add,
+                upstreamBind: localIp, idleTimeoutMs: serverIp is null ? 600000 : 60000);
+            _relay.Start();
+            router = new LocalCaptureRouter(
+                localIp, serverIp, serverPort, _relay.Port,
+                _output.Publish, _broker.Observe, udpServerIp, udpServerPort);
+            _relay.OnUpstreamBound = router.ExcludeUpstreamPort;
+            _localRouter = router;
+
+            var metadata = new
+            {
+                schema = "gateway-session/v5",
+                mode = "local-realtime-journal",
+                startedAt = _started,
+                localAddress = localIp.ToString(),
+                serverAddress = serverIp?.ToString() ?? "auto",
+                serverPort,
+                udpServerAddress = (udpServerIp ?? serverIp)?.ToString() ?? "auto",
+                udpServerPort,
+                output = $"tcp://127.0.0.1:{Port}",
+                framing = "UTF-8 JSONL",
+                payloadEncoding = "base64",
+                tgcpProfile = "mode3-md5-cbc",
+                dhPrivateSource = "fresh-PC-generated",
+                phoneMemoryInput = false,
+                web = WebUrl,
+                stateSchema = "gateway-state/v5",
+            };
+            await File.WriteAllTextAsync(Path.Combine(directory, "realtime-session.json"),
+                JsonSerializer.Serialize(metadata, new JsonSerializerOptions { WriteIndented = true }));
+            _output.Publish("session_started", metadata);
+            await _localRouter.StartAsync();
+            _statusTask = ReportStatusAsync();
+        }
+        catch
+        {
+            await DisposeAsync();
+            throw;
+        }
+    }
+
     private async Task ReportStatusAsync()
     {
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
@@ -78,6 +152,7 @@ internal sealed class RealtimeSession : IAsyncDisposable
         _statusStop.Cancel();
         if (_statusTask is not null) try { await _statusTask; } catch (Exception ex) { errors.Add(ex.Message); }
         _statusStop.Dispose();
+        if (_localRouter is not null) try { await _localRouter.DisposeAsync(); } catch (Exception ex) { errors.Add(ex.Message); }
         if (_relay is not null) try { await _relay.DisposeAsync(); } catch (Exception ex) { errors.Add(ex.Message); }
         if (_router is not null) try { await _router.DisposeAsync(); } catch (Exception ex) { errors.Add(ex.Message); }
         try { _output?.Publish("session_stopped", new { snapshot = Snapshot, errors }); }

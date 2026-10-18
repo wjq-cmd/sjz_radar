@@ -77,6 +77,12 @@ internal static class Program
             catch (Exception ex) { Console.Error.WriteLine(ex.Message); Environment.ExitCode = 1; }
             return;
         }
+        if (args.Length == 1 && args[0] == "--license-info")
+        {
+            try { LicenseService.PrintDiagnostics(); }
+            catch (Exception ex) { Console.Error.WriteLine(ex.Message); Environment.ExitCode = 1; }
+            return;
+        }
         if (args.Length > 0 && args[0] == "--check-realtime-driver")
         {
             try
@@ -96,6 +102,18 @@ internal static class Program
         if (args.Length >= 1 && args[0] == "--probe-loopback")
         {
             try { await RunLoopbackProbeAsync(args); }
+            catch (Exception ex) { Console.Error.WriteLine(ex); Environment.ExitCode = 1; }
+            return;
+        }
+        if (args.Length >= 3 && args[0] == "--local")
+        {
+            try { await RunLocalAsync(args); }
+            catch (Exception ex) { Console.Error.WriteLine(ex); Environment.ExitCode = 1; }
+            return;
+        }
+        if (args.Length >= 1 && args[0] == "--local-auto")
+        {
+            try { await RunLocalAutoAsync(args); }
             catch (Exception ex) { Console.Error.WriteLine(ex); Environment.ExitCode = 1; }
             return;
         }
@@ -215,6 +233,135 @@ internal static class Program
             });
         relay.Start(); Report("listening", new { host = "127.0.0.1", port = relay.Port });
         while (await Console.In.ReadLineAsync() is { } line && line.Trim() != "stop") { }
+    }
+
+    /// <summary>单机模式与交互式主流程共用同一把单实例锁。</summary>
+    private static FileStream? TryAcquireApplicationLock()
+    {
+        var directory = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            ProductInfo.StorageDirectory);
+        Directory.CreateDirectory(directory);
+        try
+        {
+            return new FileStream(
+                Path.Combine(directory, "interactive.lock"),
+                FileMode.OpenOrCreate,
+                FileAccess.ReadWrite,
+                FileShare.None);
+        }
+        catch (IOException)
+        {
+            return null;
+        }
+    }
+
+    private static async Task RunLocalAutoAsync(string[] args)
+    {
+        IPAddress? localIp = null;
+        if (args.Length > 1 && !IPAddress.TryParse(args[1], out localIp))
+        {
+            throw new ArgumentException("本机IP 格式不正确。用法: --local-auto [本机IP]");
+        }
+        if (localIp is null)
+        {
+            using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+            socket.Connect(IPAddress.Parse("8.8.8.8"), 53);
+            localIp = ((IPEndPoint)socket.LocalEndPoint!).Address;
+        }
+
+        using var applicationLock = TryAcquireApplicationLock();
+        if (applicationLock is null)
+        {
+            Console.WriteLine($"已有 {ProductInfo.Name} 窗口运行，请在原窗口操作或退出后重试。");
+            return;
+        }
+        if (!await LicenseService.EnsureActivatedAsync())
+        {
+            Environment.ExitCode = 3;
+            return;
+        }
+
+        var cache = Path.Combine(AppContext.BaseDirectory, "captures",
+            $"local-auto-{DateTime.Now:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(cache);
+
+        await using var live = new RealtimeSession();
+        await live.StartLocalAsync(localIp, null, 0, cache);
+
+        Console.WriteLine($"本机自动模式：本机 {localIp}");
+        Console.WriteLine("拦截本机所有新 TCP；TGCP 自动识别，非 TGCP 原样直通。");
+        Console.WriteLine($"实时缓存：{cache}");
+        Console.WriteLine($"实时网页：{live.WebUrl}");
+        Console.WriteLine("代理已就绪。现在启动游戏。");
+        live.OpenBrowser();
+        await ConsoleDashboard.RunAsync(live, null, cache, CancellationToken.None);
+    }
+
+    private static async Task RunLocalAsync(string[] args)
+    {
+        if (!IPAddress.TryParse(args[1], out var serverIp) ||
+            !int.TryParse(args[2], out var serverPort) ||
+            serverPort is < 1 or > 65535)
+        {
+            throw new ArgumentException(
+                "用法: --local <服务器IP> <服务器端口> [本机IP] [UDP服务器IP] [UDP端口]\n" +
+                "示例: --local 203.0.113.8 3027");
+        }
+
+        IPAddress? localIp = null;
+        if (args.Length > 3 && !IPAddress.TryParse(args[3], out localIp))
+        {
+            throw new ArgumentException("本机IP 格式不正确。");
+        }
+        if (localIp is null)
+        {
+            using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+            socket.Connect(serverIp, serverPort);
+            localIp = ((IPEndPoint)socket.LocalEndPoint!).Address;
+        }
+
+        IPAddress? udpIp = null;
+        if (args.Length > 4 && !IPAddress.TryParse(args[4], out udpIp))
+        {
+            throw new ArgumentException("UDP服务器IP 格式不正确。");
+        }
+        int udpPort = 0;
+        if (args.Length > 5 && (!int.TryParse(args[5], out udpPort) || udpPort is < 0 or > 65535))
+        {
+            throw new ArgumentException("UDP端口 格式不正确。");
+        }
+
+        using var applicationLock = TryAcquireApplicationLock();
+        if (applicationLock is null)
+        {
+            Console.WriteLine($"已有 {ProductInfo.Name} 窗口运行，请在原窗口操作或退出后重试。");
+            return;
+        }
+        if (!await LicenseService.EnsureActivatedAsync())
+        {
+            Environment.ExitCode = 3;
+            return;
+        }
+
+        var cache = Path.Combine(AppContext.BaseDirectory, "captures",
+            $"local-{DateTime.Now:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(cache);
+
+        await using var live = new RealtimeSession();
+        await live.StartLocalAsync(localIp, serverIp, serverPort, cache,
+            udpServerIp: udpIp, udpServerPort: udpPort);
+
+        Console.WriteLine($"本机模式：{localIp} -> {serverIp}:{serverPort}");
+        if (udpIp is not null)
+        {
+            Console.WriteLine($"UDP 观察：{localIp} <-> {udpIp}:{udpPort}");
+        }
+        Console.WriteLine($"实时缓存：{cache}");
+        Console.WriteLine($"实时网页：{live.WebUrl}");
+        Console.WriteLine("代理已就绪。现在重启游戏。");
+        live.OpenBrowser();
+        await ConsoleDashboard.RunAsync(live, null, cache, CancellationToken.None);
     }
 
     private static async Task RunLocalProbeAsync(string[] args)

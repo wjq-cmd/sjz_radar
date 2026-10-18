@@ -20,26 +20,36 @@ internal sealed class GatewayConsoleApplication
 
     public async Task RunAsync()
     {
-        PrintBanner();
         ConsoleCancelEventHandler cancelHandler = (_, e) => { e.Cancel = true; _shutdown.Cancel(); };
         Console.CancelKeyPress += cancelHandler;
         try
         {
             while (!_exitRequested && !_shutdown.IsCancellationRequested)
             {
+                PrintBanner();
+                var mode = await ChooseModeAsync();
+                if (mode == 'q') break;
+
+                if (mode == '2')
+                {
+                    try { await RunLocalModeAsync(_shutdown.Token); }
+                    catch (OperationCanceledException) when (_shutdown.IsCancellationRequested) { throw; }
+                    catch (Exception ex) { Console.WriteLine("单机模式失败：" + ex.Message); }
+                    if (_exitRequested) break;
+                    continue;
+                }
+
                 await StartCaptureAsync(true);
                 if (_exitRequested || _shutdown.IsCancellationRequested) break;
                 if (_restartRequested)
                 {
                     _restartRequested = false;
-                    PrintBanner();
                     continue;
                 }
                 Console.WriteLine();
                 Console.Write("按 Enter 重新选择设备，输入 Q 退出: ");
                 if (string.Equals((await ReadLineAsync())?.Trim(), "q", StringComparison.OrdinalIgnoreCase))
                     break;
-                PrintBanner();
             }
         }
         catch (OperationCanceledException) when (_shutdown.IsCancellationRequested)
@@ -60,9 +70,65 @@ internal sealed class GatewayConsoleApplication
         ClearConsole();
         Console.WriteLine("============================================================");
         Console.WriteLine($" {ProductInfo.Name} {ProductInfo.Version} - 实时解析 / 网页 2D + 3D");
-        Console.WriteLine(" 选择热点设备后自动开始，无需再选模式");
+        Console.WriteLine(" 支持双机（热点）与单机（本机游戏）两种模式");
         Console.WriteLine("============================================================");
         Console.WriteLine();
+    }
+
+    private async Task<char> ChooseModeAsync()
+    {
+        while (!_shutdown.IsCancellationRequested)
+        {
+            Console.WriteLine("[1] 双机模式：手机 / 第二台电脑连接本机热点");
+            Console.WriteLine("[2] 单机模式：本机运行游戏，自动识别 TGCP");
+            Console.WriteLine("[Q] 退出");
+            Console.Write("请选择（直接回车 = 单机模式）: ");
+            var input = (await ReadLineAsync())?.Trim().ToLowerInvariant();
+            if (input is null or "" or "2") return '2';
+            if (input == "1") return '1';
+            if (input == "q") return 'q';
+            Console.WriteLine("选择无效，请重新输入。");
+            Console.WriteLine();
+        }
+        return 'q';
+    }
+
+    private async Task RunLocalModeAsync(CancellationToken token)
+    {
+        IPAddress localIp;
+        using (var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp))
+        {
+            socket.Connect(IPAddress.Parse("8.8.8.8"), 53);
+            localIp = ((IPEndPoint)socket.LocalEndPoint!).Address;
+        }
+
+        var cache = Path.Combine(AppContext.BaseDirectory, "captures",
+            $"local-auto-{DateTime.Now:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(cache);
+
+        var live = new RealtimeSession();
+        try
+        {
+            await live.StartLocalAsync(localIp, null, 0, cache);
+            _realtime = live;
+        }
+        catch
+        {
+            await live.DisposeAsync();
+            throw;
+        }
+
+        Console.WriteLine();
+        Console.WriteLine($"单机模式：本机 {localIp}");
+        Console.WriteLine("拦截本机所有新 TCP；TGCP 自动识别，非 TGCP 原样直通。");
+        Console.WriteLine($"实时缓存：{cache}");
+        Console.WriteLine($"实时网页：{live.WebUrl}");
+        Console.WriteLine("代理已就绪。现在启动游戏。");
+        live.OpenBrowser();
+
+        var command = await ConsoleDashboard.RunAsync(live, null, cache, token);
+        await StopCaptureAsync();
+        _exitRequested = command == 'q';
     }
 
     private async Task SettingsAsync()
